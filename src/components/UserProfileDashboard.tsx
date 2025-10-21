@@ -1,5 +1,5 @@
 // src/components/UserProfileDashboard.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -8,7 +8,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { pricingTable, currencySymbols, planFeatures } from "@/hooks/pricing";
+import {
+  usePricing,
+  PLAN_FEATURES,
+  SUPPORTED_CURRENCIES,
+  type CurrencyCode,
+  type PlanName,
+  formatFromMinor,
+} from "@/hooks/pricing";
 import FeedbackForm from "@/components/FeedbackForm/FeedbackForm";
 
 import { 
@@ -66,16 +73,24 @@ export const UserProfileDashboard: React.FC<UserProfileDashboardProps> = ({
   const [showForm, setShowForm] = useState(false);
 
   // ==================== Pricing / currency =============================
-  const [userCurrency, setUserCurrency] = useState<"USD" | "INR" | "EUR">("USD");
-  const prices = pricingTable[userCurrency];
-  const symbol = currencySymbols[userCurrency];
+  const [userCurrency, setUserCurrency] = useState<CurrencyCode>("INR");
+  const { prices, basePrices, currency, activeOffer, error: pricingError, isLoading: pricingLoading } =
+    usePricing(userCurrency);
+
+  const offerEndsText = useMemo(() => {
+    if (!activeOffer?.endsAt) return null;
+    const date = new Date(activeOffer.endsAt);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  }, [activeOffer?.endsAt]);
 
   useEffect(() => {
     fetch("https://ipapi.co/json/")
       .then((res) => res.json())
       .then((data) => {
-        if (data.currency && ["USD", "INR", "EUR"].includes(data.currency)) {
-          setUserCurrency(data.currency);
+        const detected = typeof data.currency === "string" ? data.currency.toUpperCase() : "";
+        if ((SUPPORTED_CURRENCIES as readonly string[]).includes(detected)) {
+          setUserCurrency(detected as CurrencyCode);
         }
       })
       .catch(() => {
@@ -459,41 +474,80 @@ export const UserProfileDashboard: React.FC<UserProfileDashboardProps> = ({
             {/* Pricing cards */}
             <Card>
               <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {Object.keys(planFeatures).map((plan) => {
-                    const amount = Number((prices as any)[plan]);
-                    const displayPrice = amount === 0 ? "Free" : `${symbol}${amount}`;
-                    const isPopular = plan.toLowerCase() === "premium";
+                {pricingError && !pricingLoading && (
+                  <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                    {pricingError}
+                  </div>
+                )}
 
-                    return (
-                      <div
-                        key={plan}
-                        className={`border rounded-lg p-4 space-y-3 relative ${
-                          isPopular ? "border-2 border-primary" : ""
-                        }`}
-                      >
-                        {isPopular && (
-                          <Badge className="absolute -top-2 left-1/2 transform -translate-x-1/2">
-                            Popular
-                          </Badge>
-                        )}
-
-                        <div className="text-center">
-                          <h3 className="font-semibold capitalize">{plan}</h3>
-                          <p className="text-2xl font-bold">{displayPrice}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {(planFeatures as any)[plan].uploads}
-                          </p>
-                        </div>
-
-                        <ul className="text-sm space-y-1">
-                          {(planFeatures as any)[plan].features.map((f: string, i: number) => (
-                            <li key={i}>• {f}</li>
-                          ))}
-                        </ul>
+                {activeOffer && (
+                  <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-3 text-amber-900 text-sm">
+                    <div className="font-semibold">
+                      {activeOffer.label || "Limited-time offer"}
+                    </div>
+                    {activeOffer.description && (
+                      <div className="mt-1 text-xs md:text-sm">
+                        {activeOffer.description}
                       </div>
-                    );
-                  })}
+                    )}
+                    {offerEndsText && (
+                      <div className="mt-1 text-xs">Offer ends {offerEndsText}</div>
+                    )}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {(Object.entries(PLAN_FEATURES) as [PlanName, (typeof PLAN_FEATURES)[PlanName]][]).map(
+                    ([planKey, planInfo]) => {
+                      const amountMinor = prices[planKey] ?? 0;
+                      const baseMinor = basePrices[planKey] ?? amountMinor;
+                      const hasDiscount = baseMinor !== amountMinor;
+                      const showStriked = hasDiscount && baseMinor > amountMinor && baseMinor > 0;
+                      const displayPrice =
+                        amountMinor === 0 ? 'Free' : formatFromMinor(amountMinor, currency);
+                      const baseDisplay = showStriked ? formatFromMinor(baseMinor, currency) : null;
+                      const isPopular = planKey === 'premium';
+
+                      return (
+                        <div
+                          key={planKey}
+                          className={`border rounded-lg p-4 space-y-3 relative ${
+                            isPopular ? "border-2 border-primary" : ""
+                          }`}
+                        >
+                          {isPopular && (
+                            <Badge className="absolute -top-2 left-1/2 transform -translate-x-1/2">
+                              Popular
+                            </Badge>
+                          )}
+
+                          <div className="text-center">
+                            <h3 className="font-semibold capitalize">{planInfo.label}</h3>
+                            <div className="flex flex-col items-center gap-1">
+                              {baseDisplay && (
+                                <span className="text-sm text-muted-foreground line-through">
+                                  {baseDisplay}
+                                </span>
+                              )}
+                              <p className="text-2xl font-bold">{displayPrice}</p>
+                            </div>
+                            <p className="text-sm text-muted-foreground">{planInfo.uploads}</p>
+                            {showStriked && (
+                              <div className="mt-2 text-xs font-medium text-emerald-600">
+                                Limited-time price
+                              </div>
+                            )}
+                          </div>
+
+                          <ul className="text-sm space-y-1 text-left">
+                            {planInfo.features.map((f, i) => (
+                              <li key={i}>• {f}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      );
+                    }
+                  )}
                 </div>
 
                 <div className="mt-6 text-center">

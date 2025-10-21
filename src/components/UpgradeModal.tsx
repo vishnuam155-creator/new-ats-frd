@@ -1,11 +1,18 @@
-import React,{ useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Check, Crown, Zap, Star, Loader2 } from 'lucide-react';
 import { usePayment } from '@/hooks/usePayment';
 
-import { pricingTable,currencySymbols } from '@/hooks/pricing';
+import {
+  usePricing,
+  formatFromMinor,
+  minorToMajor,
+  SUPPORTED_CURRENCIES,
+  type CurrencyCode,
+  type PlanName,
+} from '@/hooks/pricing';
 import { useNavigate } from 'react-router-dom';
 
 
@@ -120,20 +127,23 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, cur
   // ==================== add payment options =============================
 
   // currency add 
-  const [userCurrency, setUserCurrency] = useState<"USD" | "INR" | "EUR">("USD");
-
-  // Example: later you can detect dynamically via IP
-  // const userCurrency = 'INR'; 
-  const prices = pricingTable[userCurrency];
-  const symbol = currencySymbols[userCurrency];
-  // const planFeatures = planFeatures[userCurrency];
+  const [userCurrency, setUserCurrency] = useState<CurrencyCode>("INR");
+  const { prices, basePrices, currency, activeOffer, error: pricingError, isLoading: pricingLoading } =
+    usePricing(userCurrency);
+  const offerEndsText = useMemo(() => {
+    if (!activeOffer?.endsAt) return null;
+    const date = new Date(activeOffer.endsAt);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  }, [activeOffer?.endsAt]);
 
   useEffect(() => {
     fetch("https://ipapi.co/json/")
       .then((res) => res.json())
       .then((data) => {
-        if (data.currency && ["USD", "INR", "EUR"].includes(data.currency)) {
-          setUserCurrency(data.currency);
+        const detected = typeof data.currency === "string" ? data.currency.toUpperCase() : "";
+        if ((SUPPORTED_CURRENCIES as readonly string[]).includes(detected)) {
+          setUserCurrency(detected as CurrencyCode);
         }
       })
       .catch(() => {
@@ -141,8 +151,8 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, cur
       });
   }, []);
 
-  const handleUpgrade = async (planName: string, amount: number) => {
-    if (amount === 0) {
+  const handleUpgrade = async (planName: string, amountMinor: number) => {
+    if (amountMinor === 0) {
       onClose();
       return;
     }
@@ -152,11 +162,13 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, cur
       return;
     }
 
+    const amountMajor = minorToMajor(amountMinor, currency);
+
     const result = await processPayment(
       {
         planName,
-        amount,
-        currency: userCurrency
+        amount: amountMajor,
+        currency,
       },
       authToken
     );
@@ -181,13 +193,32 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, cur
         </DialogHeader>
         
         <div className="grid md:grid-cols-3 gap-6 mt-6">
+          {pricingError && !pricingLoading && (
+            <div className="md:col-span-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {pricingError}
+            </div>
+          )}
+
+          {activeOffer && (
+            <div className="md:col-span-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+              <div className="font-semibold">{activeOffer.label || 'Limited-time offer'}</div>
+              {activeOffer.description && <div className="mt-1 text-xs md:text-sm">{activeOffer.description}</div>}
+              {offerEndsText && <div className="mt-1 text-xs">Offer ends {offerEndsText}</div>}
+            </div>
+          )}
+
           {plansConfig.map((plan) => {
-            const amount = Number(prices[plan.name]);
-            const displayPrice = amount === 0 ? 'Free' : `${symbol}${amount}/month`;
+            const planKey = plan.name.toLowerCase() as PlanName;
+            const amountMinor = prices[planKey] ?? 0;
+            const baseMinor = basePrices[planKey] ?? amountMinor;
+            const showStriked = baseMinor !== amountMinor && baseMinor > amountMinor && baseMinor > 0;
+            const baseDisplay = showStriked ? `${formatFromMinor(baseMinor, currency)}/month` : null;
+            const displayPrice =
+              amountMinor === 0 ? 'Free' : `${formatFromMinor(amountMinor, currency)}/month`;
 
             return (
-              <Card 
-                key={plan.name} 
+              <Card
+                key={plan.name}
                 className={`
                   relative bg-gradient-card border-0 shadow-elegant transition-all duration-300 hover:shadow-glow
                   ${plan.popular ? 'ring-2 ring-primary/20' : ''}
@@ -208,12 +239,18 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, cur
                   </div>
                   <div>
                     <CardTitle className="text-xl">{plan.name}</CardTitle>
-                    <CardDescription className="text-2xl font-bold text-foreground mt-2">
-                      {displayPrice}
+                    <CardDescription className="mt-2 flex flex-col items-center gap-1 text-2xl font-bold text-foreground">
+                      {baseDisplay && (
+                        <span className="text-sm text-muted-foreground line-through">{baseDisplay}</span>
+                      )}
+                      <span>{displayPrice}</span>
                     </CardDescription>
+                    {showStriked && (
+                      <div className="text-xs font-medium text-emerald-600">Limited-time price</div>
+                    )}
                   </div>
                 </CardHeader>
-                
+
                 <CardContent className="space-y-4">
                   <div className="text-center">
                     <p className="text-sm text-muted-foreground">
@@ -234,16 +271,23 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, cur
                   variant={plan.variant}
                   className="w-full mt-6"
                   onClick={() => {
-                    // handleUpgrade(plan.name, amount);
-                    navigate('/upgrade');
+                    if (authToken) {
+                      void handleUpgrade(plan.name, amountMinor);
+                    } else {
+                      navigate('/upgrade');
+                    }
                   }}
-                  disabled={currentPlan.toLowerCase() === plan.name.toLowerCase() || isProcessing}
+                  disabled={
+                    currentPlan.toLowerCase() === plan.name.toLowerCase() || isProcessing || pricingLoading
+                  }
                 >
                   {isProcessing ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Processing...
                     </>
+                  ) : pricingLoading ? (
+                    'Updating price…'
                   ) : currentPlan.toLowerCase() === plan.name.toLowerCase() ? (
                     'Current Plan'
                   ) : (

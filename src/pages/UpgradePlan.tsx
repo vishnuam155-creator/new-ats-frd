@@ -1,5 +1,5 @@
 // src/pages/UpgradePlan.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { API_BASE, authHeaders } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,26 +8,10 @@ import { PaymentElement, Elements, useStripe, useElements,LinkAuthenticationElem
 import { loadStripe } from '@stripe/stripe-js';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
-import { getDataMessage, getErrorMessage, SAFE_ERROR_MESSAGE } from '@/lib/safeErrors';
-
+import { getDataMessage, getErrorMessage } from '@/lib/safeErrors';
+import { usePricing, formatFromMinor, type PlanName } from '@/hooks/pricing';
 import { startRazorpayCheckout } from '@/hooks/useRazorpayPayment';
-type Plans = 'basic' | 'premium' | 'pro';
-
-type PricingResponse = {
-  country: string;
-  currency: 'INR' | 'USD' | 'EUR';
-  prices_minor: Record<Plans, number>;
-};
-
-const ZERO_DECIMAL = new Set<string>(['JPY', 'KRW']);
-function formatFromMinor(minor: number, currency: string, locale?: string) {
-  const divisor = ZERO_DECIMAL.has(currency) ? 1 : 100;
-  const major = (minor ?? 0) / divisor;
-  return new Intl.NumberFormat(locale || undefined, {
-    style: 'currency',
-    currency,
-  }).format(major);
-}
+type Plans = PlanName;
 
 const planFeatures: Record<Plans, string[]> = {
   basic: [
@@ -71,7 +55,16 @@ export default function UpgradePlan() {
   const { toast } = useToast();
   const navigate = useNavigate();
 
-  const [pricing, setPricing] = useState<PricingResponse | null>(null);
+  const {
+    prices,
+    basePrices,
+    currency,
+    activeOffer,
+    error: pricingError,
+    isLoading: pricingLoading,
+    lastUpdated,
+    refresh: refreshPricing,
+  } = usePricing();
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<Plans>('premium');
   const [currentPlan, setCurrentPlan] = useState<Plans>('basic');
@@ -80,6 +73,20 @@ export default function UpgradePlan() {
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [payAmountMinor, setPayAmountMinor] = useState<number | null>(null);
   const [payPlanName, setPayPlanName] = useState<Plans | null>(null);
+
+  const offerEndsText = useMemo(() => {
+    if (!activeOffer?.endsAt) return null;
+    const date = new Date(activeOffer.endsAt);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  }, [activeOffer?.endsAt]);
+
+  const lastUpdatedText = useMemo(() => {
+    if (!lastUpdated) return null;
+    const date = new Date(lastUpdated);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  }, [lastUpdated]);
 
   useEffect(() => {
     (async () => {
@@ -97,18 +104,6 @@ export default function UpgradePlan() {
       }
     })();
   }, []);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/pricing/`);
-        const json: PricingResponse = await res.json();
-        setPricing(json);
-      } catch {
-        toast({ title: 'Could not load pricing', variant: 'destructive' });
-      }
-    })();
-  }, [toast]);
 
   const handleCreatePayment = async () => {
     const token = localStorage.getItem('authToken');
@@ -130,20 +125,19 @@ export default function UpgradePlan() {
         throw new Error(message);
       }
 
-      const amtMinor = pricing?.prices_minor?.[selected] ?? 0;
+      const latest = await refreshPricing();
+      const amtMinor = latest?.prices?.[selected] ?? prices[selected] ?? 0;
       setPayAmountMinor(amtMinor);
       setPayPlanName(selected);
 
       setClientSecret(json.client_secret);
       setPaymentOpen(true);
-    } catch (e: any) {
+    } catch (e: unknown) {
       toast({ title: 'Payment init failed', description: getErrorMessage(e), variant: 'destructive' });
     } finally {
       setLoading(false);
     }
   };
-
-  const currency = pricing?.currency || 'USD';
 
 async function handlePay() {
   try {
@@ -159,8 +153,8 @@ async function handlePay() {
     await startRazorpayCheckout(selected); // now narrowed to 'premium' | 'pro'
     toast({ title: 'Payment successful', description: `Your ${selected} plan is now active.` });
     // optional: refresh profile or navigate
-  } catch (e: any) {
-    toast({ title: 'Payment failed', description: e?.message || 'Please try again', variant: 'destructive' });
+  } catch (e: unknown) {
+    toast({ title: 'Payment failed', description: getErrorMessage(e, 'Please try again'), variant: 'destructive' });
   }
 }
 
@@ -178,11 +172,34 @@ async function handlePay() {
             Experience quick, safe, and stress-free payment methods.
           </p>
 
+          {pricingError && !pricingLoading && (
+            <div className="mx-auto mb-4 max-w-3xl rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-center text-sm text-destructive">
+              {pricingError}
+            </div>
+          )}
+
+          {activeOffer && (
+            <div className="mx-auto mb-6 max-w-3xl rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900 text-sm">
+              <div className="font-semibold">{activeOffer.label || 'Limited-time offer'}</div>
+              {activeOffer.description && <div className="mt-1 text-xs md:text-sm">{activeOffer.description}</div>}
+              {offerEndsText && <div className="mt-1 text-xs">Offer ends {offerEndsText}</div>}
+            </div>
+          )}
+
+          {lastUpdatedText && (
+            <p className="mb-6 text-center text-xs text-muted-foreground">Prices refreshed {lastUpdatedText}</p>
+          )}
+
           <div className="grid md:grid-cols-3 gap-6">
             {(['basic', 'premium', 'pro'] as Plans[]).map((p) => {
               const isSelected = selected === p;
               const isCurrent = currentPlan === p;
-              const amountMinor = pricing?.prices_minor?.[p] ?? 0;
+              const amountMinor = prices[p] ?? 0;
+              const baseMinor = basePrices[p] ?? amountMinor;
+              const hasDiscount = baseMinor !== amountMinor;
+              const showStriked = hasDiscount && baseMinor > amountMinor && baseMinor > 0;
+              const displayPrice = amountMinor === 0 ? 'Free' : formatFromMinor(amountMinor, currency);
+              const baseDisplay = showStriked ? formatFromMinor(baseMinor, currency) : null;
               const isLoggedIn = !!localStorage.getItem('authToken');
 
               return (
@@ -203,10 +220,16 @@ async function handlePay() {
                         </span>
                       )}
                     </CardTitle>
-                    <div className="text-3xl font-semibold">
-                      {formatFromMinor(amountMinor, currency)}
+                    <div className="flex flex-col items-start gap-1 text-3xl font-semibold">
+                      {baseDisplay && (
+                        <span className="text-base text-muted-foreground line-through">{baseDisplay}</span>
+                      )}
+                      <span>{displayPrice}</span>
                     </div>
-                    <div className="text-xs text-muted-foreground">{currency}</div>
+                    <div className="text-xs text-muted-foreground uppercase tracking-wide">{currency}</div>
+                    {showStriked && (
+                      <div className="text-xs font-medium text-emerald-600">Limited-time price</div>
+                    )}
                   </CardHeader>
                   <CardContent>
                     <ul className="space-y-2 mb-4">
@@ -232,7 +255,7 @@ async function handlePay() {
                         <Button
                           variant="hero"
                           onClick={handlePay}
-                          disabled={loading || selected === 'basic'}
+                          disabled={loading || selected === 'basic' || pricingLoading}
                           className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold shadow-md shadow-green-200"
                         >
                           {p === 'basic'
@@ -240,6 +263,8 @@ async function handlePay() {
                             : isLoggedIn
                             ? loading
                               ? 'Starting…'
+                              : pricingLoading
+                              ? 'Fetching price…'
                               : 'Proceed to payment'
                             : 'Login to continue'}
                         </Button>
