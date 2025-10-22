@@ -38,6 +38,9 @@ export const ResumePreview = ({ data }: ResumePreviewProps) => {
             <h1 className="text-3xl font-bold text-gray-900 mb-2">
               {data.contacts.firstName || 'Name'} {data.contacts.lastName || 'A M'}
             </h1>
+            {data.contacts.title && (
+              <p className="text-sm text-gray-600 mb-2">{data.contacts.title}</p>
+            )}
             <div className="text-sm text-gray-600 space-y-1">
               <div className="flex items-center justify-center space-x-4 flex-wrap">
                 {data.contacts.email && (

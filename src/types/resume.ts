@@ -6,6 +6,7 @@ export interface ContactInfo {
   email: string;
   phone: string;
   location: string;
+  title?: string;
   website?: string;
   linkedin?: string;
   github?: string;

@@ -12,6 +12,7 @@ const initialResumeData: ResumeData = {
     email: '',
     phone: '',
     location: '',
+    title: '',
     website: '',
     linkedin: '',
     github: ''

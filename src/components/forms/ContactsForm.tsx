@@ -75,6 +75,17 @@ export const ContactsForm = ({ data, onChange }: ContactsFormProps) => {
           />
         </div>
 
+        <div className="space-y-2 md:col-span-2">
+          <Label htmlFor="title">Professional Title</Label>
+          <Input
+            id="title"
+            value={data.title ?? ''}
+            onChange={(e) => onChange({ title: e.target.value })}
+            placeholder="Senior Software Engineer"
+            className="transition-all duration-200 focus:shadow-soft"
+          />
+        </div>
+
         <div className="space-y-2">
           <Label htmlFor="website">Website</Label>
           <Input
