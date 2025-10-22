@@ -9,6 +9,7 @@ import { ModernResumeTemplate } from '@/templates/ModernResumeTemplate';
 import { ModernResumeTemplateWithPhoto } from '@/templates/ModernResumeTemplateWithPhoto';
 import { CreativeResumeTemplate } from '@/templates/CreativeResumeTemplate';
 import { CreativeResumeTemplateWithPhoto } from '@/templates/CreativeResumeTemplateWithPhoto';
+import { ElegantResumeTemplate, ElegantResumeTemplateWithPhoto } from '@/templates/ElegantResumeTemplate';
 import {
   Download,
   FileText,
@@ -19,6 +20,7 @@ import {
   UserCircle,
   Sparkles,
   Briefcase,
+  Gem,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from 'docx';
@@ -40,7 +42,7 @@ interface FinalizeFormProps {
   onUpgradeRequired?: () => void;
 }
 
-type TemplateType = 'professional' | 'modern' | 'creative';
+type TemplateType = 'professional' | 'modern' | 'creative' | 'elegant';
 
 type FormatType = 'with-photo' | 'without-photo';
 
@@ -50,11 +52,13 @@ const TEMPLATE_OPTIONS: Record<FormatType, { id: TemplateType; label: string; ic
     { id: 'professional', label: 'Professional', icon: Briefcase, img: 'src/templates/without/professional.png' },
     { id: 'modern', label: 'Modern', icon: FileText, img: 'src/templates/without/modern.png' },
     { id: 'creative', label: 'Creative', icon: Sparkles, img: 'src/templates/without/creative.png' },
+    { id: 'elegant', label: 'Elegant', icon: Gem, img: 'src/templates/without/elegant.svg' },
   ],
   'with-photo': [
     { id: 'professional', label: 'Professional (Photo)', icon: Briefcase, img: 'src/templates/with/professional_photo.png' },
     { id: 'modern', label: 'Modern (Photo)', icon: FileText, img: 'src/templates/with/modern_photo.png' },
     { id: 'creative', label: 'Creative (Photo)', icon: Sparkles, img: 'src/templates/with/creative_photo.png' },
+    { id: 'elegant', label: 'Elegant (Photo)', icon: Gem, img: 'src/templates/with/elegant_photo.svg' },
   ],
 };
 
@@ -131,6 +135,7 @@ export const FinalizeForm = ({ data, score, usageInfo, onUpgradeRequired }: Fina
       professional: { withPhoto: ProfessionalResumeTemplateWithPhoto, withoutPhoto: ProfessionalResumeTemplate },
       modern: { withPhoto: ModernResumeTemplateWithPhoto, withoutPhoto: ModernResumeTemplate },
       creative: { withPhoto: CreativeResumeTemplateWithPhoto, withoutPhoto: CreativeResumeTemplate },
+      elegant: { withPhoto: ElegantResumeTemplateWithPhoto, withoutPhoto: ElegantResumeTemplate },
     } as const;
 
     const Template = resumeFormat === 'with-photo' ? templates[selectedTemplate].withPhoto : templates[selectedTemplate].withoutPhoto;
@@ -529,6 +534,12 @@ export const FinalizeForm = ({ data, score, usageInfo, onUpgradeRequired }: Fina
         </div>
         <div id="resume-preview-pdf-creative-with-photo">
           <CreativeResumeTemplateWithPhoto data={{ ...data, photo: photoPreview || undefined }} />
+        </div>
+        <div id="resume-preview-pdf-elegant-without-photo">
+          <ElegantResumeTemplate data={data} />
+        </div>
+        <div id="resume-preview-pdf-elegant-with-photo">
+          <ElegantResumeTemplateWithPhoto data={{ ...data, photo: photoPreview || undefined }} />
         </div>
       </div>
 
